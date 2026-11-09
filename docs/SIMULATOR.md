@@ -2,9 +2,7 @@
 
 Tilt the Thingy to drive a simulated TurtleBot in Gazebo, running in an Ubuntu virtual machine on an Apple Silicon Mac. The bridge stays plugged into the Mac, and a small relay passes its stream to the virtual machine over the network, so no USB passthrough is needed.
 
-<!-- To show your demo, add docs/media/sim-demo.gif and remove these comment markers:
-![Tilting the Thingy drives a TurtleBot3 in Gazebo](media/sim-demo.gif)
--->
+https://github.com/user-attachments/assets/0d968c52-f987-4dff-b26a-3f040a129814
 
 ```mermaid
 flowchart LR

@@ -6,9 +6,13 @@ An ESP32 reads the Thingy's sensors over Bluetooth and does two things at once: 
 
 ## Demo
 
-https://github.com/user-attachments/assets/0d968c52-f987-4dff-b26a-3f040a129814
+https://github.com/user-attachments/assets/b8918524-0886-4315-85d4-fd0ae7ef2773
 
 Tilting the Thingy moves the 3D view in the motion demo and steps through a web page in real time.
+
+https://github.com/user-attachments/assets/0d968c52-f987-4dff-b26a-3f040a129814
+
+Tilting the Thingy drives a simulated TurtleBot3 in Gazebo, with its lidar beams shown. Setup is in [docs/SIMULATOR.md](docs/SIMULATOR.md).
 
 ## One controller, many machines
 
