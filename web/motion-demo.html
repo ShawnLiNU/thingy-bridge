@@ -126,8 +126,19 @@
   .feed .rx.no { color: var(--amber); }
   .feed .empty { color: var(--ink-soft); padding: 18px 14px; display: block; border: 0; }
 
+  .env { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line);
+         border-radius: 10px; overflow: hidden; background: var(--line); }
+  .env div { background: var(--panel); padding: 10px 14px; }
+  .env b { display: block; font-size: 22px; font-weight: 600; line-height: 1.15; }
+  .env b small { font-size: 14px; font-weight: 500; color: var(--ink-soft); margin-left: 3px; }
+  .env span { font-size: 13px; color: var(--ink-soft); }
+  .env .wide { grid-column: span 2; display: flex; align-items: center; justify-content: space-between; }
+  .env .wide > div { padding: 0; background: none; }
+  .swatch { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); }
+
   details { font-size: 14px; color: var(--ink-soft); }
   summary { cursor: pointer; }
+  details .list { margin-top: 10px; font-size: 14px; padding: 6px 12px; }
   pre { margin: 8px 0 0; max-height: 180px; overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; white-space: pre-wrap; }
 
   @media (prefers-reduced-motion: reduce) { .needle, .cue, .led { transition: none; } }
@@ -183,9 +194,22 @@
       <h2>Keys</h2>
       <ol id="feed"><li class="empty">Tilt, tap, or flip the Thingy.</li></ol>
     </div>
+    <div class="feed">
+      <h2>Room</h2>
+      <div class="env" id="env">
+        <div><b class="num" id="eTemp">--</b><span>Temperature</span></div>
+        <div><b class="num" id="eHum">--</b><span>Humidity</span></div>
+        <div><b class="num" id="eTvoc">--</b><span>VOCs</span></div>
+        <div><b class="num" id="eCo2">--</b><span>eCO2 (estimated)</span></div>
+        <div><b class="num" id="ePress">--</b><span>Pressure</span></div>
+        <div><b class="num" id="eBat">--</b><span>Thingy battery</span></div>
+        <div class="wide"><div><b class="num" id="eLight">--</b><span>Light</span></div><div class="swatch" id="eColor"></div></div>
+      </div>
+    </div>
     <details>
       <summary>Bridge messages</summary>
       <pre id="log"></pre>
+      <button type="button" data-cmd="s" class="list">List nearby Bluetooth devices</button>
     </details>
   </aside>
 </main>
@@ -314,6 +338,26 @@ function renderStatus() {
   document.getElementById('connect').textContent = state.usb ? 'Disconnect' : 'Connect bridge';
 }
 
+/* ---------- Room readings (climate, air, light, battery) ---------- */
+function setReading(id, value, unit, digits = 0) {
+  if (value === undefined) return;
+  document.getElementById(id).innerHTML = `${Number(value).toFixed(digits)}<small>${unit}</small>`;
+}
+function showEnv(e) {
+  setReading('eTemp', e.temp, '°C', 1);
+  setReading('eHum', e.hum, '%');
+  setReading('eTvoc', e.tvoc, 'ppb');
+  setReading('eCo2', e.eco2, 'ppm');
+  setReading('ePress', e.press, 'hPa');
+  setReading('eBat', e.bat, '%');
+  if (e.rgbc) {
+    const [r, g, b, c] = e.rgbc;
+    setReading('eLight', c, '');
+    const top = Math.max(r, g, b, 1);  // the light's color, scaled to full brightness
+    document.getElementById('eColor').style.background = `rgb(${r / top * 255}, ${g / top * 255}, ${b / top * 255})`;
+  }
+}
+
 /* ---------- Messages from the bridge ---------- */
 const logEl = document.getElementById('log');
 const logLines = [];
@@ -330,6 +374,7 @@ function handleLine(line) {
   } else if (m.t === 'key') addKey(m.k, m.sent);
   else if (m.t === 'state') { state.thingy = m.thingy; state.host = m.host; state.cal = m.cal; if (m.cal) ref = null; renderStatus(); }
   else if (m.t === 'cfg') { cfg = m; buildGauge('gLR'); buildGauge('gUD'); }
+  else if (m.t === 'env') showEnv(m);
 }
 
 /* ---------- USB connection (Web Serial) ---------- */
@@ -401,6 +446,11 @@ if (DEMO) {
     handleLine(JSON.stringify({ t: 'm', q, lr: roll, ud: pitch }));
     if (Math.abs(roll) > cfg.on && t - lastKey > 0.9) { lastKey = t; handleLine(JSON.stringify({ t: 'key', k: roll > 0 ? 'Right' : 'Left', sent: true })); }
   }, 50);
+  setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    handleLine(JSON.stringify({ t: 'env', temp: 22.6 + Math.sin(t / 9), hum: 41, press: 1012.8, eco2: 470 + Math.round(30 * Math.sin(t / 7)),
+                                tvoc: 18 + Math.round(6 * Math.sin(t / 7)), rgbc: [420, 380, 300, 1150], bat: 86 }));
+  }, 1000);
 }
 renderStatus();
 window.handleLine = handleLine;  // for testing

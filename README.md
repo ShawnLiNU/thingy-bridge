@@ -2,11 +2,11 @@
 
 Tilt, tap, and flip a Nordic Thingy:52 to control TVs, web pages, and robots.
 
-An ESP32 reads the Thingy's motion sensor over Bluetooth and does two things with it at once: it acts as a **Bluetooth keyboard**, so anything that accepts a keyboard can be controlled with no extra software, and it **streams the motion over USB**, so programs can use the full orientation. No wiring and no changes to the Thingy's firmware.
+An ESP32 reads the Thingy's sensors over Bluetooth and does two things at once: it acts as a **Bluetooth keyboard**, so anything that accepts a keyboard can be controlled with no extra software, and it **streams the data over USB**: orientation, gestures, temperature, humidity, pressure, air quality, light, and battery. No wiring and no changes to the Thingy's firmware.
 
 ## Demo
 
-https://github.com/user-attachments/assets/b8918524-0886-4315-85d4-fd0ae7ef2773
+https://github.com/user-attachments/assets/0d968c52-f987-4dff-b26a-3f040a129814
 
 Tilting the Thingy moves the 3D view in the motion demo and steps through a web page in real time.
 
@@ -34,6 +34,8 @@ flowchart LR
     end
 
     ros --> turtlebot["TurtleBot 4"]
+    ros --> sim["TurtleBot simulators<br/>in Gazebo"]
+    ros --> climate["Climate map<br/>of a building"]
     ros --> arm["UR12e arm"]
     ros --> dog["Unitree robot dog"]
 
@@ -51,6 +53,9 @@ Dashed boxes are planned.
 | TV photo app (LG webOS) | Keyboard | Ready to try |
 | [Python scripts](python/thingy_bridge.py) | USB stream | Included |
 | [TurtleBot 4 driving with ROS 2](examples/ros2/tilt_teleop.py) | USB stream | Example, not yet run on a robot |
+| [TurtleBot3 simulator on a Mac (UTM and Gazebo)](docs/SIMULATOR.md) | USB stream, shared over the network | Tested |
+| [TurtleBot 4 simulator on a Mac](docs/SIMULATOR.md#the-turtlebot-4-simulator) | USB stream, shared over the network | Tested, slow in a virtual machine |
+| [Climate map on a TurtleBot 4, viewed live in Lichtblick](docs/TURTLEBOT4.md) | USB stream | Example, not yet run on a robot |
 | UR12e arm | USB stream | Planned |
 | Unitree robot dog | USB stream | Planned |
 
@@ -67,7 +72,7 @@ Hold the Thingy flat, logo up.
 | Flip face down for about 1 second | Escape | `key` event |
 | Triple tap | Learn "flat" again | |
 
-Holding a tilt repeats the key, faster the further you tilt, so a small tilt steps slowly and a big tilt scrolls quickly. The stream also carries the full orientation (a quaternion) and the gravity vector. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
+Holding a tilt repeats the key, faster the further you tilt, so a small tilt steps slowly and a big tilt scrolls quickly. The stream also carries the full orientation (a quaternion), the gravity vector, and the room readings once a second. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ## Quick start
 
@@ -93,7 +98,7 @@ Holding a tilt repeats the key, faster the further you tilt, so a small tilt ste
 1. Pair **Thingy Bridge** in your computer's Bluetooth settings.
 2. Close the Arduino Serial Monitor, then open `web/motion-demo.html` in Chrome or Edge and choose **Connect bridge**.
 3. Press the Thingy's button to wake it, and hold it still for a second.
-4. Tilt it. The 3D view follows, and each gesture shows up as a key marked **Received** once your computer gets it as a keyboard key.
+4. Tilt it. The 3D view follows, and each gesture shows up as a key marked **Received** once your computer gets it as a keyboard key. The room readings appear below, updated once a second.
 
 To see the demo page without hardware, open it with `?demo=1` at the end of the address. If something doesn't work, see [docs/TUNING.md](docs/TUNING.md).
 
@@ -121,7 +126,13 @@ On the computer the bridge is plugged into, with ROS 2 sourced:
 python3 examples/ros2/tilt_teleop.py
 ```
 
-Double tap to arm, tilt forward and sideways to drive, flip face down to stop. Speeds are capped at 0.15 m/s and 0.8 rad/s by default. Use `--ros-args -p stamped:=true` if your robot expects `TwistStamped`.
+Double tap to arm (it learns how you're holding it as "flat"), tilt forward and sideways to drive, and flip face down to stop. Putting it down on a table also stops the robot until you pick it up. Speeds are capped at 0.15 m/s and 0.8 rad/s by default. Use `--ros-args -p stamped:=true` if your robot expects `TwistStamped`, as the TurtleBot 4 does on ROS 2 Jazzy.
+
+No robot handy? [docs/SIMULATOR.md](docs/SIMULATOR.md) drives a simulated TurtleBot in Gazebo, in an Ubuntu virtual machine on a Mac, with the lidar beams shown as it moves. `python/serial_relay.py` shares the bridge's USB port over the network, so any script here can use `socket://HOST:5555` in place of a serial port.
+
+### Map a building's climate with a TurtleBot 4
+
+With the Thingy on the robot and the bridge plugged into the robot's Raspberry Pi, `examples/ros2/thingy_ros.py` publishes every reading as a ROS 2 topic and drops a colored dot on the robot's map for each one. Lichtblick shows the map, the dots, and live charts on your laptop. Setup is in [docs/TURTLEBOT4.md](docs/TURTLEBOT4.md).
 
 ## Repository layout
 
@@ -129,10 +140,14 @@ Double tap to arm, tilt forward and sideways to drive, flip face down to stop. S
 firmware/ThingyBridge/     ESP32 firmware (Arduino)
 web/motion-demo.html       live 3D view and key check, over USB (Web Serial)
 python/thingy_bridge.py    Python reader for the USB stream
+python/serial_relay.py     shares the bridge's USB port with a virtual machine
 examples/keyboard-webpage/ a web page controlled only by keys
-examples/ros2/             tilt to drive a mobile robot
+examples/ros2/             tilt to drive a mobile robot, and all readings as ROS 2 topics
 docs/PROTOCOL.md           keys, stream format, and commands
 docs/TUNING.md             settings and troubleshooting
+docs/TURTLEBOT4.md         the bridge on a TurtleBot 4, with Lichtblick
+docs/SIMULATOR.md          drive a simulated TurtleBot on a Mac
+CHANGELOG.md               what changed in each version
 ```
 
 ## Safety with robots

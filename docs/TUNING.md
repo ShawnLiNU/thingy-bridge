@@ -14,6 +14,7 @@ At the top of `firmware/ThingyBridge/ThingyBridge.ino`:
 | `SWAP_AXES`, `INVERT_LR`, `INVERT_UD` | Fix swapped or reversed directions |
 | `BACK_KEY` | Escape by default. Some TVs need `0x2A` (Backspace). |
 | `STREAM`, `STREAM_MS` | The USB stream and its update interval |
+| `ENVIRONMENT`, `ENV_MS` | Reading the Thingy's climate, air, light, and battery sensors, and how often to send them |
 | `LED_PIN` | Status light: fast blink waits for a host, slow blink looks for the Thingy, steady means ready |
 
 ## Troubleshooting
@@ -23,8 +24,18 @@ At the top of `firmware/ThingyBridge/ThingyBridge.ino`:
 | No port for the board | Use a USB cable that transfers data, and try without a hub. If the Mac lists the board's USB chip but no port, install the free driver for it: CP210x (Silicon Labs) or CH340/CH9102 (WCH). |
 | Compile error about the library | Install NimBLE-Arduino 2.x and choose the ESP32 Dev Module board |
 | The host doesn't list Thingy Bridge | Press the board's EN button to restart it, and remove any old pairing from the host first |
-| The Thingy never connects | Press its button to wake it, and disconnect it from the Thingy phone app, since it accepts one connection at a time |
+| The Thingy never connects | Press its button to wake it, and disconnect it from the Thingy phone app or any computer, since it accepts one connection at a time. In the motion demo, open Bridge messages and choose **List nearby Bluetooth devices**: if the Thingy isn't listed, something else is connected to it or it's out of range. |
+| The Thingy shows up as "ThingyDfu" | It's in firmware-update mode and has no sensors running. Turn it off and on without holding its button, and wait a minute. If it still says ThingyDfu, reinstall its firmware from a phone (below). |
 | A second host can't connect | The bridge pairs with one host at a time. Turn off Bluetooth on the first one, or remove the pairing there. |
 | Gestures do nothing, but test keys work | Watch the gauges in the motion demo. If they stay near 0, choose Set as flat or triple tap. |
 | The demo says "Not received" | The bridge sent the key but the computer didn't get it. Check the Bluetooth connection, and click the page so it has focus. |
 | Double tap starts the Music app on a Mac | That is the Play/Pause key working |
+
+## Reinstalling the Thingy's firmware
+
+If the Thingy stays in update mode ("ThingyDfu"), put its standard firmware back over Bluetooth with a phone. It's free and takes a couple of minutes.
+
+1. **Unplug the bridge**, so it can't take the Thingy's only connection during the update.
+2. On the phone, download the latest firmware update package (a `.zip` file) from the releases page of Nordic's Thingy:52 firmware repository on GitHub (NordicSemiconductor/Nordic-Thingy52-FW).
+3. In the **nRF Connect** app, scan, connect to **ThingyDfu**, and tap the **DFU** button. Choose **Distribution packet (ZIP)**, pick the downloaded file, and start.
+4. When it finishes, the Thingy restarts and appears as **Thingy** again. Plug the bridge back in.

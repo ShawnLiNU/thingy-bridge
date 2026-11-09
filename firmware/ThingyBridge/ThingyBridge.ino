@@ -23,6 +23,7 @@
     l r u d o b p   send Left, Right, Up, Down, OK, Back, Play/Pause by hand
     c               learn "flat" again
     i               report settings and connection state
+    s               list the Bluetooth devices the bridge can see (for finding the Thingy)
 */
 
 #include <NimBLEDevice.h>
@@ -32,9 +33,10 @@
 // Defined here, before any function: the Arduino IDE adds declarations of every function
 // near the top of the file, and handleAxis() needs this type to already exist there.
 struct Axis { bool on; int dir; uint32_t since; uint32_t last; };  // one tilt direction's state
+typedef void (*NotifyFn)(NimBLERemoteCharacteristic*, uint8_t*, size_t, bool);  // a Thingy data handler
 
 // ---------------- Settings you may want to change ----------------
-static const char*    FIRMWARE_VERSION = "1.0.0";
+static const char*    FIRMWARE_VERSION = "1.1.3";
 static const char*    DEVICE_NAME     = "Thingy Bridge"; // Bluetooth keyboard name shown on the host
 static const int      LED_PIN         = 2;     // onboard LED on most WROOM-32E boards, -1 for none
 static const float    TILT_ON_DEG     = 25;    // tilt past this to press a key
@@ -51,6 +53,8 @@ static const bool     INVERT_UD       = false; // set true if up and down are re
 static const uint8_t  BACK_KEY        = 0x29;  // Escape. If the TV ignores it, try 0x2A (Backspace)
 static const bool     STREAM          = true;  // send motion as JSON lines over USB for motion-demo.html
 static const uint32_t STREAM_MS       = 50;    // 20 updates per second
+static const bool     ENVIRONMENT     = true;  // also read the Thingy's climate, air, light, and battery sensors
+static const uint32_t ENV_MS          = 1000;  // send climate readings once a second
 
 // ---------------- Keyboard and media key codes (USB HID) ----------------
 static const uint8_t  KEY_RIGHT = 0x4F, KEY_LEFT = 0x50, KEY_DOWN = 0x51, KEY_UP = 0x52, KEY_ENTER = 0x28;
@@ -64,6 +68,14 @@ static NimBLEUUID MOTION_CONFIG ("ef680401-9b35-4933-9b10-52ffa9740042");
 static NimBLEUUID TAP_CHAR      ("ef680402-9b35-4933-9b10-52ffa9740042");
 static NimBLEUUID QUAT_CHAR     ("ef680404-9b35-4933-9b10-52ffa9740042");  // orientation, for the 3D demo
 static NimBLEUUID GRAVITY_CHAR  ("ef68040a-9b35-4933-9b10-52ffa9740042");
+static NimBLEUUID ENV_SERVICE   ("ef680200-9b35-4933-9b10-52ffa9740042");  // climate, air, and light
+static NimBLEUUID TEMP_CHAR     ("ef680201-9b35-4933-9b10-52ffa9740042");
+static NimBLEUUID PRESSURE_CHAR ("ef680202-9b35-4933-9b10-52ffa9740042");
+static NimBLEUUID HUMIDITY_CHAR ("ef680203-9b35-4933-9b10-52ffa9740042");
+static NimBLEUUID GAS_CHAR      ("ef680204-9b35-4933-9b10-52ffa9740042");
+static NimBLEUUID COLOR_CHAR    ("ef680205-9b35-4933-9b10-52ffa9740042");
+static NimBLEUUID BATTERY_SERVICE((uint16_t)0x180F);  // standard Bluetooth battery service
+static NimBLEUUID BATTERY_LEVEL  ((uint16_t)0x2A19);
 
 // HID report map: a keyboard (report 1) and media keys (report 2).
 static const uint8_t REPORT_MAP[] = {
@@ -166,6 +178,15 @@ static bool     tapPending  = false;
 static float    quat[4]     = {1, 0, 0, 0};  // w, x, y, z
 static bool     haveQuat    = false;
 
+// Latest climate readings. Each "have" flag turns on once that sensor has reported.
+struct Env {
+  float tempC = 0, pressureHpa = 0;
+  uint8_t humidity = 0, battery = 0;
+  uint16_t eco2 = 0, tvoc = 0, rgbc[4] = {0, 0, 0, 0};
+  bool haveTemp = false, havePressure = false, haveHumidity = false, haveGas = false, haveColor = false, haveBattery = false;
+};
+static Env env;
+
 static void onGravity(NimBLERemoteCharacteristic*, uint8_t* data, size_t len, bool) {
   if (len < 12) return;
   float v[3];
@@ -186,6 +207,48 @@ static void onQuat(NimBLERemoteCharacteristic*, uint8_t* data, size_t len, bool)
   portEXIT_CRITICAL(&dataLock);
 }
 
+// Thingy environment formats (little-endian):
+//   temperature: int8 degrees + uint8 hundredths    pressure: int32 hPa + uint8 hundredths
+//   humidity: uint8 %    gas: uint16 eCO2 ppm + uint16 TVOC ppb    color: uint16 red, green, blue, clear
+static void onTemp(NimBLERemoteCharacteristic*, uint8_t* d, size_t len, bool) {
+  if (len < 2) return;
+  portENTER_CRITICAL(&dataLock);
+  env.tempC = (int8_t)d[0] + (d[0] & 0x80 ? -d[1] : d[1]) / 100.0f; env.haveTemp = true;
+  portEXIT_CRITICAL(&dataLock);
+}
+static void onPressure(NimBLERemoteCharacteristic*, uint8_t* d, size_t len, bool) {
+  if (len < 5) return;
+  int32_t whole; memcpy(&whole, d, 4);
+  portENTER_CRITICAL(&dataLock);
+  env.pressureHpa = whole + d[4] / 100.0f; env.havePressure = true;
+  portEXIT_CRITICAL(&dataLock);
+}
+static void onHumidity(NimBLERemoteCharacteristic*, uint8_t* d, size_t len, bool) {
+  if (len < 1) return;
+  portENTER_CRITICAL(&dataLock);
+  env.humidity = d[0]; env.haveHumidity = true;
+  portEXIT_CRITICAL(&dataLock);
+}
+static void onGas(NimBLERemoteCharacteristic*, uint8_t* d, size_t len, bool) {
+  if (len < 4) return;
+  portENTER_CRITICAL(&dataLock);
+  env.eco2 = d[0] | (d[1] << 8); env.tvoc = d[2] | (d[3] << 8); env.haveGas = true;
+  portEXIT_CRITICAL(&dataLock);
+}
+static void onColor(NimBLERemoteCharacteristic*, uint8_t* d, size_t len, bool) {
+  if (len < 8) return;
+  portENTER_CRITICAL(&dataLock);
+  for (int i = 0; i < 4; i++) env.rgbc[i] = d[2 * i] | (d[2 * i + 1] << 8);
+  env.haveColor = true;
+  portEXIT_CRITICAL(&dataLock);
+}
+static void onBattery(NimBLERemoteCharacteristic*, uint8_t* d, size_t len, bool) {
+  if (len < 1) return;
+  portENTER_CRITICAL(&dataLock);
+  env.battery = d[0]; env.haveBattery = true;
+  portEXIT_CRITICAL(&dataLock);
+}
+
 static void onTap(NimBLERemoteCharacteristic*, uint8_t* data, size_t len, bool) {
   if (len < 2) return;  // byte 0: direction, byte 1: tap count
   portENTER_CRITICAL(&dataLock);
@@ -197,13 +260,47 @@ static void onTap(NimBLERemoteCharacteristic*, uint8_t* data, size_t len, bool) 
 class ThingyCallbacks : public NimBLEClientCallbacks {
   void onDisconnect(NimBLEClient* c, int reason) override {
     thingyConnected = false;
+    portENTER_CRITICAL(&dataLock);
+    env = Env();  // don't report old readings after a reconnect
+    haveQuat = false;
+    portEXIT_CRITICAL(&dataLock);
     Serial.printf("Thingy disconnected (reason %d). Press its button to wake it.\n", reason);
   }
 };
 
+// A Thingy advertises its configuration service. A renamed one may not, so also accept any name with "thingy" in it.
+static std::string lowerName(const NimBLEAdvertisedDevice* d) {
+  std::string name = d->getName();
+  for (auto& ch : name) ch = tolower(ch);
+  return name;
+}
+// "ThingyDfu" is a Thingy in firmware-update mode: it has no sensors to read, so leave it alone.
+static bool inUpdateMode(const NimBLEAdvertisedDevice* d) { return lowerName(d).find("dfu") != std::string::npos; }
+static bool looksLikeThingy(const NimBLEAdvertisedDevice* d) {
+  if (inUpdateMode(d)) return false;
+  if (d->isAdvertisingService(THINGY_SERVICE)) return true;
+  return lowerName(d).find("thingy") != std::string::npos;
+}
+static uint32_t lastDfuNote = 0;
+
+static volatile bool listing = false;  // the "s" command: print every device seen instead of connecting
+static uint32_t      listUntil = 0;
+
 class ScanCallbacks : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* d) override {
-    if (d->isAdvertisingService(THINGY_SERVICE) || d->getName() == "Thingy") {
+    const bool thingy = looksLikeThingy(d);
+    if (listing) {
+      const std::string name = d->getName();
+      Serial.printf("  %s  %4d dBm  %s%s\n", d->getAddress().toString().c_str(), d->getRSSI(),
+                    name.empty() ? "(no name)" : name.c_str(),
+                    thingy ? "   <- Thingy" : (inUpdateMode(d) ? "   <- Thingy in update mode" : ""));
+      return;
+    }
+    if (inUpdateMode(d) && (lastDfuNote == 0 || millis() - lastDfuNote > 30000)) {
+      lastDfuNote = millis();
+      Serial.println("Found a Thingy in firmware-update mode (ThingyDfu). Restart it, or reinstall its firmware: see docs/TUNING.md");
+    }
+    if (thingy) {
       Serial.printf("Found Thingy at %s\n", d->getAddress().toString().c_str());
       thingyFound = d;
       doConnect = true;
@@ -211,6 +308,15 @@ class ScanCallbacks : public NimBLEScanCallbacks {
     }
   }
 };
+
+static void startListing() {
+  if (thingyConnected) { Serial.println("The Thingy is already connected"); return; }
+  NimBLEDevice::getScan()->stop();
+  listing = true;
+  listUntil = millis() + 6000;
+  Serial.println("Bluetooth devices the bridge can see (6 s):");
+  NimBLEDevice::getScan()->start(6000, false);
+}
 
 // Neutral ("flat") direction of gravity, learned after connecting or with a triple tap.
 static float    neutral[3]  = {0, 0, 1};
@@ -223,6 +329,29 @@ static void startCalibration() {
   calibrating = true; calStart = millis();
   calSum[0] = calSum[1] = calSum[2] = 0; calCount = 0;
   Serial.println("Hold the Thingy still the way you like to hold it...");
+}
+
+// Climate, air, light, and battery: each one is optional, so a missing sensor never blocks the rest.
+static void subscribeOptional(NimBLERemoteService* svc, const NimBLEUUID& uuid, NotifyFn cb, const char* name) {
+  NimBLERemoteCharacteristic* c = svc ? svc->getCharacteristic(uuid) : nullptr;
+  if (!c || !c->canNotify() || !c->subscribe(true, cb)) { Serial.printf("%s not available\n", name); return; }
+  if (c->canRead()) {  // get a first value now instead of waiting for the next update
+    NimBLEAttValue v = c->readValue();
+    if (v.size()) cb(c, (uint8_t*)v.data(), v.size(), false);
+  }
+}
+
+static void subscribeEnvironment() {
+  NimBLERemoteService* e = thingy->getService(ENV_SERVICE);
+  if (!e) { Serial.println("Thingy has no environment service"); }
+  else {
+    subscribeOptional(e, TEMP_CHAR, onTemp, "Temperature");
+    subscribeOptional(e, PRESSURE_CHAR, onPressure, "Pressure");
+    subscribeOptional(e, HUMIDITY_CHAR, onHumidity, "Humidity");
+    subscribeOptional(e, GAS_CHAR, onGas, "Air quality");
+    subscribeOptional(e, COLOR_CHAR, onColor, "Light");
+  }
+  subscribeOptional(thingy->getService(BATTERY_SERVICE), BATTERY_LEVEL, onBattery, "Battery level");
 }
 
 static bool connectThingy() {
@@ -253,6 +382,7 @@ static bool connectThingy() {
   if (!t || !t->canNotify() || !t->subscribe(true, onTap)) Serial.println("Taps not available");
   NimBLERemoteCharacteristic* q = motion->getCharacteristic(QUAT_CHAR);
   if (STREAM && (!q || !q->canNotify() || !q->subscribe(true, onQuat))) Serial.println("Orientation not available, the demo shows tilt only");
+  if (STREAM && ENVIRONMENT) subscribeEnvironment();
 
   Serial.println("Thingy connected");
   startCalibration();
@@ -304,6 +434,7 @@ static void processMotion() {
   const float u[3] = {g[0] / len, g[1] / len, g[2] / len};
 
   if (calibrating) {  // average for 0.8 s
+    tiltLR = tiltUD = 0;  // report no tilt while learning, never an old value
     calSum[0] += u[0]; calSum[1] += u[1]; calSum[2] += u[2]; calCount++;
     if (now - calStart > 800 && calCount > 3) {
       const float n = sqrtf(calSum[0] * calSum[0] + calSum[1] * calSum[1] + calSum[2] * calSum[2]);
@@ -384,6 +515,30 @@ static void streamMotion() {
                         g[0], g[1], g[2], tiltLR, tiltUD);
 }
 
+// Climate readings, once a second, with only the sensors that have reported so far.
+static uint32_t lastEnv = 0;
+static void streamEnvironment() {
+  if (!STREAM || !ENVIRONMENT || !thingyConnected) return;
+  const uint32_t now = millis();
+  if (now - lastEnv < ENV_MS) return;
+  lastEnv = now;
+  Env e;
+  portENTER_CRITICAL(&dataLock);
+  e = env;
+  portEXIT_CRITICAL(&dataLock);
+  if (!(e.haveTemp || e.havePressure || e.haveHumidity || e.haveGas || e.haveColor || e.haveBattery)) return;
+  char line[256];
+  int n = snprintf(line, sizeof(line), "{\"t\":\"env\"");
+  if (e.haveTemp)     n += snprintf(line + n, sizeof(line) - n, ",\"temp\":%.2f", e.tempC);
+  if (e.haveHumidity) n += snprintf(line + n, sizeof(line) - n, ",\"hum\":%u", e.humidity);
+  if (e.havePressure) n += snprintf(line + n, sizeof(line) - n, ",\"press\":%.2f", e.pressureHpa);
+  if (e.haveGas)      n += snprintf(line + n, sizeof(line) - n, ",\"eco2\":%u,\"tvoc\":%u", e.eco2, e.tvoc);
+  if (e.haveColor)    n += snprintf(line + n, sizeof(line) - n, ",\"rgbc\":[%u,%u,%u,%u]", e.rgbc[0], e.rgbc[1], e.rgbc[2], e.rgbc[3]);
+  if (e.haveBattery)  n += snprintf(line + n, sizeof(line) - n, ",\"bat\":%u", e.battery);
+  snprintf(line + n, sizeof(line) - n, "}");
+  Serial.println(line);
+}
+
 // ---------------- Status light ----------------
 // Fast blink: waiting for the TV. Slow blink: TV connected, looking for the Thingy. On: ready.
 static void updateLed() {
@@ -406,6 +561,7 @@ static void handleSerial() {
       case 'p': pressPlayPause(); break;
       case 'c': startCalibration(); break;
       case 'i': reportInfo(); break;
+      case 's': startListing(); break;
       default: break;
     }
   }
@@ -457,10 +613,20 @@ void loop() {
     doConnect = false;
     thingyConnected = connectThingy();
   }
+  if (listing && millis() > listUntil) {
+    listing = false;
+    Serial.println("End of list. If the Thingy isn't in it, it's asleep, out of range, or connected to another device.");
+  }
+  static uint32_t lastSearchNote = 0;
   if (!thingyConnected && !doConnect && !NimBLEDevice::getScan()->isScanning()) {
+    if (!listing && (lastSearchNote == 0 || millis() - lastSearchNote > 30000)) {
+      lastSearchNote = millis();
+      Serial.println("Looking for the Thingy...");
+    }
     NimBLEDevice::getScan()->start(5000, false);  // look for the Thingy for 5 s, then again
   }
   if (thingyConnected) processMotion();
   streamMotion();
+  streamEnvironment();
   delay(10);
 }

@@ -34,6 +34,26 @@ The bridge appears as a USB serial port at **115200 baud**. Each line is one JSO
 | `lr` | Left/right tilt in degrees relative to "flat". Positive is right. |
 | `ud` | Back/forward tilt in degrees relative to "flat". Positive is the direction that sends Up. |
 
+### Room readings, once a second
+
+```json
+{"t":"env","temp":23.45,"hum":41,"press":1013.25,"eco2":412,"tvoc":12,"rgbc":[10,20,30,300],"bat":87}
+```
+
+Only sensors that have reported appear, so early messages may have fewer fields.
+
+| Field | Meaning |
+|---|---|
+| `temp` | Temperature in °C |
+| `hum` | Relative humidity in % |
+| `press` | Air pressure in hPa |
+| `eco2` | Estimated CO2 in ppm. The Thingy calculates it from VOCs, so use it for comparing places, not as a true CO2 measurement. |
+| `tvoc` | Volatile organic compounds in ppb |
+| `rgbc` | Raw red, green, blue, and clear light readings. Clear is overall brightness, but not in lux. |
+| `bat` | Thingy battery in % |
+
+The gas sensor needs about 20 minutes to warm up each time, and a longer break-in on its first use. Temperature and humidity respond slowly, over seconds to tens of seconds.
+
 ### Gesture events
 
 ```json
@@ -67,6 +87,9 @@ Send single characters over the same serial port:
 | `l` `r` `u` `d` | Send Left, Right, Up, Down |
 | `o` `b` `p` | Send Enter, Back, Play/Pause |
 | `c` | Learn "flat" again |
+| `s` | List the Bluetooth devices the bridge can see, to check that it finds the Thingy |
 | `i` | Report settings and state |
+
+To use the stream from another computer or a virtual machine, run `python/serial_relay.py` where the bridge is plugged in. It passes everything through in both directions at `socket://HOST:5555`, and the Python scripts accept that address wherever they take a port.
 
 Opening the port can reset some ESP32 boards. To avoid that, set DTR and RTS to off right after opening, as `python/thingy_bridge.py` and the web demo do.

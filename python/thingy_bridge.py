@@ -22,7 +22,9 @@ Or run it to watch the stream:
 Requires pyserial:  pip install pyserial
 """
 import argparse
+import glob
 import json
+import os
 import sys
 
 import serial
@@ -30,14 +32,27 @@ from serial.tools import list_ports
 
 # Names that USB serial adapters on ESP32 boards usually get on macOS and Linux.
 PORT_HINTS = ("usbserial", "wchusbserial", "SLAB_USBtoUART", "ttyUSB", "ttyACM")
+PREFERRED_PORT = "/dev/thingy_bridge"  # a fixed name, set up as in docs/TURTLEBOT4.md
 
 
 def find_port():
-    """Return the first serial port that looks like an ESP32 board, or None."""
-    for p in list_ports.comports():
-        if any(hint in p.device for hint in PORT_HINTS):
-            return p.device
-    return None
+    """Return the bridge's serial port.
+
+    Uses /dev/thingy_bridge if it exists. Otherwise looks for ESP32-style ports, skipping any
+    port a lidar already uses (the TurtleBot 4's lidar is also a USB serial device). Raises
+    RuntimeError if there is no port, or more than one possible port.
+    """
+    if os.path.exists(PREFERRED_PORT):
+        return PREFERRED_PORT
+    taken = {os.path.realpath(p) for p in glob.glob("/dev/*")
+             if os.path.islink(p) and "lidar" in os.path.basename(p).lower()}
+    ports = [p.device for p in list_ports.comports()
+             if any(hint in p.device for hint in PORT_HINTS) and os.path.realpath(p.device) not in taken]
+    if not ports:
+        raise RuntimeError("No ESP32 serial port found. Plug in the bridge, or give the port.")
+    if len(ports) > 1:
+        raise RuntimeError("More than one possible port (" + ", ".join(ports) + "). Give the port to use.")
+    return ports[0]
 
 
 class Bridge:
@@ -45,12 +60,13 @@ class Bridge:
 
     def __init__(self, port=None, baud=115200, timeout=1.0):
         self.port = port or find_port()
-        if not self.port:
-            raise RuntimeError("No ESP32 serial port found. Plug in the bridge, or pass port=...")
-        self.serial = serial.Serial(self.port, baud, timeout=timeout)
-        # Keep the board running: some adapters reset it when these lines change.
-        self.serial.dtr = False
-        self.serial.rts = False
+        # A serial port, or a network address such as socket://192.168.64.1:5555 (see serial_relay.py)
+        self.serial = serial.serial_for_url(self.port, baud, timeout=timeout)
+        try:
+            self.serial.dtr = False  # keep the board running: some adapters reset it when these lines change
+            self.serial.rts = False
+        except (OSError, ValueError, serial.SerialException):
+            pass  # network connections have no such lines
 
     def messages(self, include_text=False):
         """Yield each JSON message as a dict. Plain text lines are skipped unless include_text."""
@@ -105,6 +121,10 @@ def main():
                 print(f"\rtilt left/right {msg['lr']:6.1f}   back/forward {msg['ud']:6.1f}", end="", flush=True)
             elif msg["t"] == "key":
                 print(f"\ngesture: {msg['k']}" + ("" if msg.get("sent") else " (no Bluetooth host)"))
+            elif msg["t"] == "env":
+                parts = [f"{msg['temp']:.1f} C" if "temp" in msg else "", f"{msg['hum']}% humidity" if "hum" in msg else "",
+                         f"{msg['tvoc']} ppb VOCs" if "tvoc" in msg else "", f"battery {msg['bat']}%" if "bat" in msg else ""]
+                print("\nroom: " + ", ".join(p for p in parts if p))
             elif msg["t"] == "state":
                 state = (msg["thingy"], msg["host"], msg.get("cal"))
                 if state == last_state:
