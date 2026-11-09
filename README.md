@@ -6,8 +6,7 @@ An ESP32 reads the Thingy's motion sensor over Bluetooth and does two things wit
 
 ## Demo
 
-<!-- Replace the next line with your video: edit this file on GitHub and drag the video file onto this spot. -->
-https://github.com/user-attachments/assets/REPLACE-WITH-YOUR-VIDEO
+https://github.com/user-attachments/assets/b8918524-0886-4315-85d4-fd0ae7ef2773
 
 Tilting the Thingy moves the 3D view in the motion demo and steps through a web page in real time.
 
