@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Arduino and editors
+build/
+.vscode/
+*.bin
+
+# Large media: upload videos through the GitHub editor instead of committing them
+*.mov
+*.mp4

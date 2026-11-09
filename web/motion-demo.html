@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thingy Bridge motion demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
+<style>
+  :root {
+    --bench: #E6ECF0;      /* page */
+    --panel: #F6F9FB;
+    --ink: #1D2833;
+    --ink-soft: #5B6B78;
+    --line: #C9D4DC;
+    --nordic: #00A9CE;     /* the Thingy's blue */
+    --amber: #E39A2D;      /* a key fired */
+    --ok: #2E9E6A;
+    --off: #B7C3CC;
+    --face-top: #3FC0DF; --face-front: #0E94B8; --face-side: #0A7C9C; --face-back: #086983; --face-bottom: #065466;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bench: #1A2530; --panel: #22303C; --ink: #E4ECF1; --ink-soft: #94A6B3; --line: #354654; --off: #4A5C69;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bench); color: var(--ink); }
+  body { font: 16px/1.45 "Barlow", "Helvetica Neue", Arial, sans-serif; min-height: 100vh; }
+  .num { font-family: "Barlow Semi Condensed", "Barlow", sans-serif; font-variant-numeric: tabular-nums; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px;
+    max-width: 1180px; margin: 0 auto; padding: 22px 28px 10px;
+  }
+  h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: .005em; margin-right: auto; }
+  .status { display: flex; gap: 20px; font-size: 15px; color: var(--ink-soft); }
+  .status span { display: inline-flex; align-items: center; gap: 7px; }
+  .status i { width: 10px; height: 10px; border-radius: 50%; background: var(--off); }
+  .status .on i { background: var(--ok); }
+  .status .wait i { background: var(--amber); }
+  button {
+    font: inherit; font-weight: 500; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; cursor: pointer;
+  }
+  button:hover { border-color: var(--nordic); }
+  button:focus-visible { outline: 2px solid var(--nordic); outline-offset: 2px; }
+  button.primary { background: var(--nordic); border-color: var(--nordic); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  main {
+    max-width: 1180px; margin: 0 auto; padding: 10px 28px 36px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 26px;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  /* ---------- Stage with the Thingy ---------- */
+  .stage {
+    position: relative; min-height: 520px; border-radius: 14px; overflow: hidden;
+    background:
+      radial-gradient(ellipse 60% 45% at 50% 62%, rgba(0, 169, 206, .10), transparent 70%),
+      var(--panel);
+    border: 1px solid var(--line);
+    perspective: 1100px;
+  }
+  .scene { position: absolute; left: 50%; top: 47%; transform-style: preserve-3d; transform: rotateX(-24deg); }
+  .box { position: absolute; transform-style: preserve-3d; will-change: transform; }
+  .face { position: absolute; border-radius: 6px; backface-visibility: hidden; }
+  .face.top, .face.bottom { border-radius: 24px; }
+  .face.top {
+    background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.22) 0 22%, transparent 23%), var(--face-top);
+    box-shadow: inset 0 0 0 10px rgba(255,255,255,.10);
+  }
+  .face.front { background: linear-gradient(var(--face-front), var(--face-side)); }
+  .face.back { background: var(--face-back); }
+  .face.left, .face.right { background: var(--face-side); }
+  .face.bottom { background: var(--face-bottom); }
+  .led {
+    position: absolute; width: 22px; height: 22px; left: calc(50% - 11px); top: calc(50% - 11px);
+    border-radius: 50%; background: rgba(255,255,255,.55); transition: background .25s, box-shadow .25s;
+  }
+  .led.hit { background: var(--amber); box-shadow: 0 0 22px 8px rgba(227,154,45,.75); transition: none; }
+  .port { position: absolute; left: calc(50% - 18px); bottom: 26px; width: 36px; height: 9px; border-radius: 4px; background: rgba(0,0,0,.35); }
+  .floor {
+    position: absolute; left: 50%; top: 73%; width: 340px; height: 70px; margin-left: -170px;
+    border-radius: 50%; background: radial-gradient(ellipse, rgba(0,40,60,.28), transparent 70%);
+  }
+
+  /* Arrows around the stage light up when a key fires */
+  .cue { position: absolute; color: var(--off); font-size: 40px; line-height: 1; transition: color .3s, transform .3s; user-select: none; }
+  .cue.hit { color: var(--amber); transform: scale(1.25); transition: none; }
+  .cue.l { left: 26px; top: 50%; margin-top: -20px; }
+  .cue.r { right: 26px; top: 50%; margin-top: -20px; }
+  .cue.u { top: 18px; left: 50%; margin-left: -14px; }
+  .cue.d { bottom: 60px; left: 50%; margin-left: -14px; }
+  .notice {
+    position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; color: var(--ink-soft); font-size: 15px; padding: 0 20px;
+  }
+
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+  .tools .sep { width: 1px; height: 26px; background: var(--line); margin: 0 6px; }
+  .tools button { min-width: 46px; }
+
+  /* ---------- Side panel ---------- */
+  aside { display: flex; flex-direction: column; gap: 22px; }
+  .gauge h2, .feed h2 { margin: 0 0 8px; font-size: 16px; font-weight: 500; color: var(--ink-soft); display: flex; justify-content: space-between; }
+  .gauge h2 .num { color: var(--ink); font-size: 26px; font-weight: 600; line-height: 1; }
+  .gauge.active h2 .num { color: var(--amber); }
+  .track { position: relative; height: 34px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
+  .zone { position: absolute; top: 0; bottom: 0; background: rgba(227,154,45,.13); }
+  .tick { position: absolute; top: 6px; bottom: 6px; width: 1px; background: var(--line); }
+  .tick.mid { top: 0; bottom: 0; background: var(--ink-soft); opacity: .5; }
+  .needle { position: absolute; top: 3px; bottom: 3px; width: 6px; margin-left: -3px; border-radius: 3px; background: var(--nordic); transition: left .06s linear; }
+  .gauge.active .needle { background: var(--amber); }
+  .ends { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink-soft); margin-top: 4px; }
+
+  .feed ol { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); min-height: 220px; max-height: 300px; overflow: auto; }
+  .feed li { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  .feed li:last-child { border-bottom: 0; }
+  .feed .k { font-weight: 600; }
+  .feed .t { color: var(--ink-soft); font-size: 13px; }
+  .feed .rx { font-size: 14px; color: var(--ink-soft); min-width: 84px; text-align: right; }
+  .feed .rx.yes { color: var(--ok); }
+  .feed .rx.no { color: var(--amber); }
+  .feed .empty { color: var(--ink-soft); padding: 18px 14px; display: block; border: 0; }
+
+  details { font-size: 14px; color: var(--ink-soft); }
+  summary { cursor: pointer; }
+  pre { margin: 8px 0 0; max-height: 180px; overflow: auto; padding: 10px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 12.5px; white-space: pre-wrap; }
+
+  @media (prefers-reduced-motion: reduce) { .needle, .cue, .led { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Thingy Bridge</h1>
+  <div class="status" aria-live="polite">
+    <span id="sUsb"><i></i>USB</span>
+    <span id="sThingy"><i></i>Thingy</span>
+    <span id="sHost"><i></i>Keyboard paired</span>
+  </div>
+  <button id="connect" class="primary" type="button">Connect bridge</button>
+</header>
+
+<main>
+  <section>
+    <div class="stage" id="stage">
+      <div class="floor"></div>
+      <div class="scene"><div class="box" id="box"></div></div>
+      <div class="cue l" data-key="Left" aria-hidden="true">◀</div>
+      <div class="cue r" data-key="Right" aria-hidden="true">▶</div>
+      <div class="cue u" data-key="Up" aria-hidden="true">▲</div>
+      <div class="cue d" data-key="Down" aria-hidden="true">▼</div>
+      <div class="notice" id="notice"></div>
+    </div>
+    <div class="tools">
+      <button type="button" data-cmd="l" aria-label="Send Left">◀</button>
+      <button type="button" data-cmd="r" aria-label="Send Right">▶</button>
+      <button type="button" data-cmd="u" aria-label="Send Up">▲</button>
+      <button type="button" data-cmd="d" aria-label="Send Down">▼</button>
+      <button type="button" data-cmd="o">OK</button>
+      <button type="button" data-cmd="b">Back</button>
+      <button type="button" data-cmd="p" aria-label="Send Play/Pause">⏯</button>
+      <span class="sep"></span>
+      <button type="button" id="flat">Set as flat</button>
+    </div>
+  </section>
+
+  <aside>
+    <div class="gauge" id="gLR">
+      <h2>Left / right <span class="num" id="vLR">0°</span></h2>
+      <div class="track"></div>
+      <div class="ends"><span>Left</span><span>Right</span></div>
+    </div>
+    <div class="gauge" id="gUD">
+      <h2>Back / forward <span class="num" id="vUD">0°</span></h2>
+      <div class="track"></div>
+      <div class="ends"><span>Down</span><span>Up</span></div>
+    </div>
+    <div class="feed">
+      <h2>Keys</h2>
+      <ol id="feed"><li class="empty">Tilt, tap, or flip the Thingy.</li></ol>
+    </div>
+    <details>
+      <summary>Bridge messages</summary>
+      <pre id="log"></pre>
+    </details>
+  </aside>
+</main>
+
+<script>
+'use strict';
+
+/* ---------- Thingy box (CSS 3D) ---------- */
+const W = 220, D = 220, H = 84;  // a rounded block, like the Thingy:52
+const box = document.getElementById('box');
+const faces = {
+  top:    [W, D, `rotateX(90deg) translateZ(${H / 2}px)`],
+  bottom: [W, D, `rotateX(-90deg) translateZ(${H / 2}px)`],
+  front:  [W, H, `translateZ(${D / 2}px)`],
+  back:   [W, H, `rotateY(180deg) translateZ(${D / 2}px)`],
+  right:  [D, H, `rotateY(90deg) translateZ(${W / 2}px)`],
+  left:   [D, H, `rotateY(-90deg) translateZ(${W / 2}px)`],
+};
+for (const [name, [w, h, t]] of Object.entries(faces)) {
+  const f = document.createElement('div');
+  f.className = 'face ' + name;
+  Object.assign(f.style, { width: w + 'px', height: h + 'px', left: -w / 2 + 'px', top: -h / 2 + 'px', transform: t });
+  if (name === 'top') { const led = document.createElement('div'); led.className = 'led'; led.id = 'led'; f.append(led); }
+  if (name === 'front') { const port = document.createElement('div'); port.className = 'port'; f.append(port); }
+  box.append(f);
+}
+
+/* ---------- Orientation ----------
+   The Thingy's quaternion (w, x, y, z) gives its rotation. The view shows it relative to the
+   moment you pressed "Set as flat". Thingy axes: x right, y forward, z up. CSS axes: x right,
+   y down, z toward you, so M swaps them: thingy x -> css x, y -> -z, z -> -y. */
+let ref = null;  // rotation matrix captured as "flat"
+const M = [[1, 0, 0], [0, 0, -1], [0, -1, 0]];
+const mul = (A, B) => A.map((r, i) => B[0].map((_, j) => r.reduce((s, _, k) => s + A[i][k] * B[k][j], 0)));
+const tr = A => A[0].map((_, j) => A.map(r => r[j]));
+function quatToMatrix([w, x, y, z]) {
+  const n = Math.hypot(w, x, y, z) || 1; w /= n; x /= n; y /= n; z /= n;
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+    [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+    [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+  ];
+}
+function showQuat(q) {
+  const R = quatToMatrix(q);
+  if (!ref) ref = R;
+  const C = mul(mul(M, mul(tr(ref), R)), M);
+  // matrix3d takes the columns one after another
+  box.style.transform = `matrix3d(${C[0][0]},${C[1][0]},${C[2][0]},0,${C[0][1]},${C[1][1]},${C[2][1]},0,${C[0][2]},${C[1][2]},${C[2][2]},0,0,0,0,1)`;
+}
+function showTilt(lr, ud) { box.style.transform = `rotateX(${ud}deg) rotateZ(${lr}deg)`; }  // no orientation data
+
+/* ---------- Gauges ---------- */
+const RANGE = 70;
+let cfg = { on: 25, off: 12, fast: 55 };
+const pct = deg => 50 + (Math.max(-RANGE, Math.min(RANGE, deg)) / RANGE) * 50;
+function buildGauge(id) {
+  const track = document.querySelector(`#${id} .track`);
+  track.innerHTML = '';
+  const zone = (a, b) => { const z = document.createElement('div'); z.className = 'zone'; z.style.left = pct(a) + '%'; z.style.width = (pct(b) - pct(a)) + '%'; track.append(z); };
+  zone(-RANGE, -cfg.on); zone(cfg.on, RANGE);
+  for (const v of [-cfg.fast, -cfg.on, -cfg.off, cfg.off, cfg.on, cfg.fast]) {
+    const t = document.createElement('div'); t.className = 'tick'; t.style.left = pct(v) + '%'; track.append(t);
+  }
+  const mid = document.createElement('div'); mid.className = 'tick mid'; mid.style.left = '50%'; track.append(mid);
+  const needle = document.createElement('div'); needle.className = 'needle'; needle.style.left = '50%'; track.append(needle);
+}
+function setGauge(id, valueId, deg) {
+  document.querySelector(`#${id} .needle`).style.left = pct(deg) + '%';
+  document.getElementById(valueId).textContent = `${deg > 0 ? '+' : ''}${deg.toFixed(0)}°`;
+  document.getElementById(id).classList.toggle('active', Math.abs(deg) > cfg.on);
+}
+buildGauge('gLR'); buildGauge('gUD');
+
+/* ---------- Key feed: sent by the bridge, then received here as a keyboard key ---------- */
+const KEY_OF = { Left: 'ArrowLeft', Right: 'ArrowRight', Up: 'ArrowUp', Down: 'ArrowDown', Enter: 'Enter', Back: 'Escape', 'Play/Pause': 'MediaPlayPause' };
+const feed = document.getElementById('feed');
+const pending = [];  // rows waiting for the matching keyboard key
+function flash(el, cls = 'hit', ms = 380) { el.classList.add(cls); setTimeout(() => el.classList.remove(cls), ms); }
+function addKey(name, sent) {
+  feed.querySelector('.empty')?.remove();
+  const li = document.createElement('li');
+  const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  li.innerHTML = `<span class="k"></span><span class="t num"></span><span class="rx"></span>`;
+  li.children[0].textContent = name;
+  li.children[1].textContent = time;
+  const rx = li.children[2];
+  if (DEMO) rx.textContent = 'Simulated';
+  else if (!sent) { rx.textContent = 'No host'; rx.classList.add('no'); }
+  else {
+    rx.textContent = 'Waiting';
+    const row = { key: KEY_OF[name], rx, at: performance.now() };
+    pending.push(row);
+    setTimeout(() => { if (pending.includes(row)) { pending.splice(pending.indexOf(row), 1); rx.textContent = 'Not received'; rx.classList.add('no'); } }, 1200);
+  }
+  feed.prepend(li);
+  while (feed.children.length > 40) feed.lastChild.remove();
+  flash(document.getElementById('led'));
+  const cue = document.querySelector(`.cue[data-key="${name}"]`);
+  if (cue) flash(cue);
+}
+document.addEventListener('keydown', e => {
+  const i = pending.findIndex(p => p.key === e.key || (p.key === 'Escape' && e.key === 'Backspace'));
+  if (i >= 0) {
+    const [row] = pending.splice(i, 1);
+    row.rx.textContent = 'Received';
+    row.rx.classList.add('yes');
+  }
+  if (e.key.startsWith('Arrow')) e.preventDefault();  // keep the page still
+});
+
+/* ---------- Status ---------- */
+const state = { usb: false, thingy: false, host: false, cal: false };
+function renderStatus() {
+  const set = (id, on, wait) => { const el = document.getElementById(id); el.classList.toggle('on', on); el.classList.toggle('wait', !on && wait); };
+  set('sUsb', state.usb);
+  set('sThingy', state.thingy && !state.cal, state.cal);
+  set('sHost', state.host);
+  const n = document.getElementById('notice');
+  if (!('serial' in navigator) && !DEMO) n.textContent = 'Open this page in Chrome or Edge to connect over USB.';
+  else if (!state.usb) n.textContent = 'Plug the bridge into this computer and choose Connect bridge.';
+  else if (!state.thingy) n.textContent = 'Press the Thingy’s button to wake it.';
+  else if (state.cal) n.textContent = 'Hold the Thingy still.';
+  else if (!state.host) n.textContent = `Pair “${cfg.name || 'Thingy Bridge'}” in this computer’s Bluetooth settings to test the keys.`;
+  else n.textContent = '';
+  document.getElementById('connect').textContent = state.usb ? 'Disconnect' : 'Connect bridge';
+}
+
+/* ---------- Messages from the bridge ---------- */
+const logEl = document.getElementById('log');
+const logLines = [];
+function log(text) { logLines.push(text); if (logLines.length > 80) logLines.shift(); logEl.textContent = logLines.join('\n'); }
+function handleLine(line) {
+  line = line.trim();
+  if (!line) return;
+  if (line[0] !== '{') { log(line); return; }
+  let m;
+  try { m = JSON.parse(line); } catch { log(line); return; }
+  if (m.t === 'm') {
+    if (m.q) showQuat(m.q); else showTilt(m.lr, m.ud);
+    setGauge('gLR', 'vLR', m.lr); setGauge('gUD', 'vUD', m.ud);
+  } else if (m.t === 'key') addKey(m.k, m.sent);
+  else if (m.t === 'state') { state.thingy = m.thingy; state.host = m.host; state.cal = m.cal; if (m.cal) ref = null; renderStatus(); }
+  else if (m.t === 'cfg') { cfg = m; buildGauge('gLR'); buildGauge('gUD'); }
+}
+
+/* ---------- USB connection (Web Serial) ---------- */
+let port = null, reader = null, writer = null;
+const encoder = new TextEncoder();
+async function connect() {
+  if (!('serial' in navigator)) return;
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    try { await port.setSignals({ dataTerminalReady: false, requestToSend: false }); } catch (e) { /* not all adapters */ }
+  } catch (e) { port = null; log('Could not open the port: ' + e.message); return; }
+  state.usb = true; renderStatus();
+  writer = port.writable.getWriter();
+  send('i');
+  readLoop();
+}
+async function readLoop() {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    reader = port.readable.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf('\n')) >= 0) { handleLine(buffer.slice(0, nl)); buffer = buffer.slice(nl + 1); }
+    }
+  } catch (e) { log('Connection lost: ' + e.message); }
+  await disconnect();
+}
+async function disconnect() {
+  try { reader && await reader.cancel(); } catch (e) { /* closed */ }
+  try { reader && reader.releaseLock(); } catch (e) { /* closed */ }
+  try { writer && writer.releaseLock(); } catch (e) { /* closed */ }
+  try { port && await port.close(); } catch (e) { /* closed */ }
+  port = reader = writer = null;
+  Object.assign(state, { usb: false, thingy: false, host: false, cal: false });
+  renderStatus();
+}
+async function send(cmd) {
+  if (DEMO) { demoCommand(cmd); return; }
+  if (writer) await writer.write(encoder.encode(cmd));
+}
+if ('serial' in navigator) navigator.serial.addEventListener('disconnect', () => disconnect());
+
+document.getElementById('connect').addEventListener('click', e => { e.currentTarget.blur(); state.usb ? disconnect() : connect(); });
+document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => { b.blur(); send(b.dataset.cmd); }));
+document.getElementById('flat').addEventListener('click', e => { e.currentTarget.blur(); ref = null; send('c'); });
+
+/* ---------- Demo without hardware (?demo=1) ---------- */
+const DEMO = new URLSearchParams(location.search).has('demo');
+function demoCommand(cmd) {
+  const names = { l: 'Left', r: 'Right', u: 'Up', d: 'Down', o: 'Enter', b: 'Back', p: 'Play/Pause' };
+  if (names[cmd]) handleLine(JSON.stringify({ t: 'key', k: names[cmd], sent: true }));
+  if (cmd === 'c') { handleLine('{"t":"state","host":true,"thingy":true,"cal":true}'); setTimeout(() => handleLine('{"t":"state","host":true,"thingy":true,"cal":false}'), 800); }
+}
+if (DEMO) {
+  Object.assign(state, { usb: true, thingy: true, host: true });
+  let t0 = performance.now(), lastKey = 0;
+  setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    const roll = 38 * Math.sin(t * 0.7), pitch = 18 * Math.sin(t * 0.45 + 1), yaw = 25 * Math.sin(t * 0.2);
+    const r = v => v * Math.PI / 360;  // half angle in radians
+    const [cr, sr, cp, sp, cy, sy] = [Math.cos(r(roll)), Math.sin(r(roll)), Math.cos(r(pitch)), Math.sin(r(pitch)), Math.cos(r(yaw)), Math.sin(r(yaw))];
+    // rotation about y (roll, tilting left/right), x (pitch), and z (yaw), in Thingy axes
+    const q = [cy * cp * cr + sy * sp * sr, cy * sp * cr + sy * cp * sr, cy * cp * sr - sy * sp * cr, sy * cp * cr - cy * sp * sr];
+    handleLine(JSON.stringify({ t: 'm', q, lr: roll, ud: pitch }));
+    if (Math.abs(roll) > cfg.on && t - lastKey > 0.9) { lastKey = t; handleLine(JSON.stringify({ t: 'key', k: roll > 0 ? 'Right' : 'Left', sent: true })); }
+  }, 50);
+}
+renderStatus();
+window.handleLine = handleLine;  // for testing
+</script>
+</body>
+</html>
